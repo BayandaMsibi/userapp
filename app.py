@@ -1,5 +1,6 @@
 from flask import Flask, g, render_template, redirect, url_for, request, flash
 import sqlite3
+from datetime import datetime
 from models import get_db, close_connection, init_db, add_sample_data
 from forms import ProfileForm
 
@@ -8,6 +9,13 @@ app.config['SECRET_KEY'] = 'dev-secret-key-change-me'
 
 # Register teardown context
 app.teardown_appcontext(close_connection)
+
+@app.after_request
+def after_request(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.route('/')
 def index():
@@ -23,8 +31,16 @@ def register():
     if form.validate_on_submit():
         db = get_db()
         try:
-            age_value = form.age.data if form.age.data is not None else None
+            # Handle age properly
+            age_value = None
+            if form.age.data is not None and form.age.data != '':
+                try:
+                    age_value = int(form.age.data)
+                except (ValueError, TypeError):
+                    age_value = None
+            
             bio_value = (form.bio.data or '').strip()
+            
             db.execute(
                 'INSERT INTO users (username, full_name, email, age, bio) VALUES (?, ?, ?, ?, ?)',
                 ( (form.username.data or '').strip(),
@@ -38,6 +54,7 @@ def register():
             flash('User registered successfully.', 'success')
             return redirect(url_for('index'))
         except sqlite3.IntegrityError:
+            db.rollback()
             flash('Error saving user: username or email might already exist.', 'error')
     return render_template('register.html', form=form)
 
@@ -62,7 +79,6 @@ def update(user_id):
 
     form = ProfileForm()
     if request.method == 'GET':
-        # Populate form fields with existing values so the user can edit them.
         form.username.data = user['username']
         form.full_name.data = user['full_name']
         form.email.data = user['email']
@@ -70,8 +86,16 @@ def update(user_id):
         form.bio.data = user['bio']
     elif form.validate_on_submit():
         try:
-            age_value = form.age.data if form.age.data is not None else None
+            # Handle age properly
+            age_value = None
+            if form.age.data is not None and form.age.data != '':
+                try:
+                    age_value = int(form.age.data)
+                except (ValueError, TypeError):
+                    age_value = None
+                    
             bio_value = (form.bio.data or '').strip()
+            
             db.execute(
                 'UPDATE users SET username = ?, full_name = ?, email = ?, age = ?, bio = ? WHERE id = ?',
                 ( (form.username.data or '').strip(),
@@ -86,6 +110,7 @@ def update(user_id):
             flash('User updated successfully.', 'success')
             return redirect(url_for('profile', user_id=user_id))
         except sqlite3.IntegrityError:
+            db.rollback()
             flash('Error updating user: username or email might conflict with an existing user.', 'error')
 
     return render_template('update.html', form=form, user=user)
